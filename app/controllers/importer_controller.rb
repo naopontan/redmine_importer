@@ -490,14 +490,16 @@ class ImporterController < ApplicationController
         else
           begin
             value = case cf.field_format
-                      when 'user'
-                        user_id_for_login!(value).to_s
-                      when 'version'
-                        version_id_for_name!(project, value, add_versions).to_s
-                      when 'date'
-                        value.to_date.to_s(:db)
-                      else
-                        value
+                    when 'user'
+                      user_id_for_login!(value).to_s
+                    when 'version'
+                      version_id_for_name!(project, value, add_versions).to_s
+                    when 'date'
+                      value.to_date.to_s(:db)
+                    when 'bool'
+                      convert_to_0_or_1(value)
+                    else
+                      value
                     end
             h[cf.id] = value
           rescue
@@ -706,6 +708,17 @@ class ImporterController < ApplicationController
       else
         val
       end
+    end
+  end
+
+  def convert_to_0_or_1(raw_value)
+    case raw_value
+    when I18n.t("general_text_yes")
+      "1"
+    when I18n.t("general_text_no")
+      "0"
+    else
+      nil
     end
   end
 
