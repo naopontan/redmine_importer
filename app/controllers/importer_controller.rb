@@ -496,6 +496,8 @@ class ImporterController < ApplicationController
                       version_id_for_name!(project, value, add_versions).to_s
                     when 'date'
                       value.to_date.to_s(:db)
+                    when 'bool'
+                      convert_to_0_or_1(value)
                     else
                       value
                     end
@@ -706,6 +708,17 @@ class ImporterController < ApplicationController
       else
         val
       end
+    end
+  end
+
+  def convert_to_0_or_1(raw_value)
+    case raw_value
+    when I18n.t("general_text_yes")
+      "1"
+    when I18n.t("general_text_no")
+      "0"
+    else
+      nil
     end
   end
 
