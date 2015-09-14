@@ -220,7 +220,7 @@ class ImporterController < ApplicationController
 
         update_project_issues_stat(project)
 
-        assign_issue_attrs(issue, category, fixed_version_id, assigned_to, status, row, priority)
+        assign_issue_attrs(issue, category, fixed_version_id, assigned_to, status, row, priority, tracker)
         handle_parent_issues(issue, row, ignore_non_exist, unique_attr)
         handle_custom_fields(add_versions, issue, project, row)
         handle_watchers(issue, row, watchers)
@@ -386,11 +386,12 @@ class ImporterController < ApplicationController
     end
   end
 
-  def assign_issue_attrs(issue, category, fixed_version_id, assigned_to, status, row, priority)
+  def assign_issue_attrs(issue, category, fixed_version_id, assigned_to, status, row, priority, tracker)
     # required attributes
     issue.status_id = status != nil ? status.id : issue.status_id
     issue.priority_id = priority != nil ? priority.id : issue.priority_id
     issue.subject = fetch("subject", row) || issue.subject
+    issue.tracker_id = tracker.present? ? tracker.id : issue.tracker_id
 
     # optional attributes
     issue.description = fetch("description", row) || issue.description
