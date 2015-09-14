@@ -490,14 +490,14 @@ class ImporterController < ApplicationController
         else
           begin
             value = case cf.field_format
-                      when 'user'
-                        user_id_for_login!(value).to_s
-                      when 'version'
-                        version_id_for_name!(project, value, add_versions).to_s
-                      when 'date'
-                        value.to_date.to_s(:db)
-                      else
-                        value
+                    when 'user'
+                      user_id_for_login!(value).to_s
+                    when 'version'
+                      version_id_for_name!(project, value, add_versions).to_s
+                    when 'date'
+                      value.to_date.to_s(:db)
+                    else
+                      value
                     end
             h[cf.id] = value
           rescue
