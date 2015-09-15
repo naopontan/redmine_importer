@@ -683,7 +683,7 @@ class ImporterController < ApplicationController
   # Implements a cache of version ids based on version name
   # If add_versions is true and a valid name is given,
   # will create a new version and save it when it doesn't exist yet.
-  def version_id_for_name!(project,name,add_versions)
+  def version_id_for_name!(project, name, add_versions)
     if !@version_id_by_name.has_key?(name)
       version = project.shared_versions.find_by_name(name)
       if !version
