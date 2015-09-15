@@ -18,7 +18,7 @@ class ImporterController < ApplicationController
   ISSUE_ATTRS = [:id, :subject, :assigned_to, :fixed_version,
                  :author, :description, :category, :priority, :tracker, :status,
                  :start_date, :due_date, :done_ratio, :estimated_hours,
-                 :parent_issue, :watchers ]
+                 :parent_issue, :watchers, :is_private ]
 
   def index; end
 
@@ -409,6 +409,7 @@ class ImporterController < ApplicationController
     issue.fixed_version_id = fixed_version_id if fixed_version_id
     issue.done_ratio = row[@attrs_map["done_ratio"]] || issue.done_ratio
     issue.estimated_hours = row[@attrs_map["estimated_hours"]] || issue.estimated_hours
+    issue.is_private = (convert_to_boolean(fetch("is_private", row)) || false)
   end
 
   def handle_parent_issues(issue, row, ignore_non_exist, unique_attr)
@@ -711,12 +712,20 @@ class ImporterController < ApplicationController
     end
   end
 
+  def convert_to_boolean(raw_value)
+    return_value_by raw_value, true, false
+  end
+
   def convert_to_0_or_1(raw_value)
+    return_value_by raw_value, "1", "0"
+  end
+
+  def return_value_by(raw_value, value_yes, value_no)
     case raw_value
     when I18n.t("general_text_yes")
-      "1"
+      value_yes
     when I18n.t("general_text_no")
-      "0"
+      value_no
     else
       nil
     end
