@@ -485,33 +485,31 @@ class ImporterController < ApplicationController
     custom_failed_count = 0
     issue.custom_field_values = issue.available_custom_fields.inject({}) do |h, cf|
       value = row[@attrs_map[cf.name]]
-      unless value.blank?
-        if cf.multiple
-          h[cf.id] = process_multivalue_custom_field(project, add_versions, issue, cf, value)
-        else
-          begin
-            value = case cf.field_format
-                    when 'user'
-                      user_id_for_login!(value).to_s
-                    when 'version'
-                      version_id_for_name!(project, value, add_versions).to_s
-                    when 'date'
-                      value.to_date.to_s(:db)
-                    when 'bool'
-                      convert_to_0_or_1(value)
-                    else
-                      value
-                    end
-            h[cf.id] = value
-          rescue
-            if custom_failed_count == 0
-              custom_failed_count += 1
-              @failed_count += 1
-              @failed_issues[@failed_count] = row
-            end
-            @messages << "Warning: When trying to set custom field #{cf.name}" \
-                           " on issue #{@failed_count} below, value #{value} was invalid"
+      if cf.multiple
+        h[cf.id] = process_multivalue_custom_field(project, add_versions, issue, cf, value)
+      else
+        begin
+          value = case cf.field_format
+                  when 'user'
+                    user_id_for_login!(value).to_s
+                  when 'version'
+                    version_id_for_name!(project, value, add_versions).to_s
+                  when 'date'
+                    value.to_date.to_s(:db)
+                  when 'bool'
+                    convert_to_0_or_1(value)
+                  else
+                    value
+                  end
+          h[cf.id] = value
+        rescue
+          if custom_failed_count == 0
+            custom_failed_count += 1
+            @failed_count += 1
+            @failed_issues[@failed_count] = row
           end
+          @messages << "Warning: When trying to set custom field #{cf.name}" \
+                         " on issue #{@failed_count} below, value #{value} was invalid"
         end
       end
       h
@@ -702,6 +700,8 @@ class ImporterController < ApplicationController
   end
 
   def process_multivalue_custom_field(project, add_versions, issue, custom_field, csv_val)
+    return [] if csv_val.blank?
+
     csv_val.split(',').map(&:strip).map do |val|
       if custom_field.field_format == 'version'
         version = version_id_for_name!(project, val, add_versions)
