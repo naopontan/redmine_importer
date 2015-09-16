@@ -422,9 +422,11 @@ class ImporterController < ApplicationController
 
   def handle_parent_issues(issue, row, ignore_non_exist, unique_attr)
     begin
-      parent_value = row[@attrs_map["parent_issue"]]
-      if parent_value && (parent_value.length > 0)
+      parent_value = fetch("parent_issue", row)
+      if parent_value.present?
         issue.parent_issue_id = issue_for_unique_attr(unique_attr, parent_value, row).id
+      else
+        issue.parent_issue_id = nil
       end
     rescue NoIssueForUniqueValue
       if ignore_non_exist
