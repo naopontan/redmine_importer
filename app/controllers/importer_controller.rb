@@ -212,7 +212,7 @@ class ImporterController < ApplicationController
       rescue ActiveRecord::RecordNotFound
         log_failure(row, "Warning: When adding issue #{@failed_count+1} below," \
                     " the #{@unfound_class} #{@unfound_key} was not found")
-        raise RowFailed
+        next
       end
 
       begin
@@ -232,9 +232,11 @@ class ImporterController < ApplicationController
         handle_watchers(issue, row, watchers)
       rescue RowFailed
         next
+      rescue ActiveRecord::RecordNotFound
+        log_failure(row, "Warning: When adding issue #{@failed_count+1} below," \
+                    " the #{@unfound_class} #{@unfound_key} was not found")
+        next
       end
-
-
 
       begin
         issue_saved = issue.save
