@@ -394,21 +394,23 @@ class ImporterController < ApplicationController
     issue.tracker_id = tracker.present? ? tracker.id : issue.tracker_id
 
     # optional attributes
-    issue.description = fetch("description", row) || issue.description
-    issue.category_id = category != nil ? category.id : issue.category_id
+    issue.description = fetch("description", row)
+    issue.category_id = category.try(:id)
 
-    if fetch("start_date", row).present?
-      issue.start_date = Date.parse(fetch("start_date", row))
+    ["start_date", "due_date"].each do |date_field_name|
+      date_field_value = fetch(date_field_name, row)
+
+      if date_field_value.present?
+        issue.send("#{date_field_name}=", Date.parse(date_field_value))
+      else
+        issue.send("#{date_field_name}=", nil)
+      end
     end
-    issue.due_date = if row[@attrs_map["due_date"]].blank?
-                       nil
-                     else
-                       Date.parse(row[@attrs_map["due_date"]])
-                     end
-    issue.assigned_to_id = assigned_to.id if assigned_to
-    issue.fixed_version_id = fixed_version_id if fixed_version_id
-    issue.done_ratio = row[@attrs_map["done_ratio"]] || issue.done_ratio
-    issue.estimated_hours = row[@attrs_map["estimated_hours"]] || issue.estimated_hours
+
+    issue.assigned_to_id = assigned_to.try(:id)
+    issue.fixed_version_id = fixed_version_id
+    issue.done_ratio = fetch("done_ratio", row)
+    issue.estimated_hours = fetch("estimated_hours", row)
     issue.is_private = (convert_to_boolean(fetch("is_private", row)) || false)
   end
 
@@ -489,18 +491,23 @@ class ImporterController < ApplicationController
         h[cf.id] = process_multivalue_custom_field(project, add_versions, issue, cf, value)
       else
         begin
-          value = case cf.field_format
-                  when 'user'
-                    user_id_for_login!(value).to_s
-                  when 'version'
-                    version_id_for_name!(project, value, add_versions).to_s
-                  when 'date'
-                    value.to_date.to_s(:db)
-                  when 'bool'
-                    convert_to_0_or_1(value)
-                  else
-                    value
-                  end
+          if value.present?
+            value = case cf.field_format
+                    when 'user'
+                      user_id_for_login!(value).to_s
+                    when 'version'
+                      version_id_for_name!(project, value, add_versions).to_s
+                    when 'date'
+                      value.to_date.to_s(:db)
+                    when 'bool'
+                      convert_to_0_or_1(value)
+                    else
+                      value
+                    end
+          else
+            value = nil
+          end
+
           h[cf.id] = value
         rescue
           if custom_failed_count == 0
