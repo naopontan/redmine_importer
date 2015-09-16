@@ -24,6 +24,12 @@ class ImporterController < ApplicationController
 
 
   def match
+    if params[:file].blank?
+      flash[:error] = I18n.t(:flash_csv_file_is_blank)
+      redirect_to action: :index
+      return
+    end
+
     # Delete existing iip to ensure there can't be two iips for a user
     ImportInProgress.delete_all(["user_id = ?",User.current.id])
     # save import-in-progress data
