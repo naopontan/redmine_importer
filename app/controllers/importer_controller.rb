@@ -188,6 +188,12 @@ class ImporterController < ApplicationController
           category.save
         end
 
+        if category.blank? && fetch("category", row).present?
+          @unfound_class = "Category"
+          @unfound_key = fetch("category", row)
+          raise ActiveRecord::RecordNotFound
+        end
+
         if fetch("assigned_to", row).present?
           assigned_to = user_for_login!(fetch("assigned_to", row))
         else
