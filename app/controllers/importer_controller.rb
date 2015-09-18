@@ -242,6 +242,10 @@ class ImporterController < ApplicationController
         log_failure(row, "Warning: When adding issue #{@failed_count+1} below," \
                     " the #{@unfound_class} #{@unfound_key} was not found")
         next
+      rescue ArgumentError
+        log_failure(row, "Warning: When adding issue #{@failed_count+1} below," \
+                    " #{@error_value} is not valid value.")
+        next
       end
 
       begin
@@ -415,7 +419,12 @@ class ImporterController < ApplicationController
       date_field_value = fetch(date_field_name, row)
 
       if date_field_value.present?
-        issue.send("#{date_field_name}=", Date.parse(date_field_value))
+        begin
+          issue.send("#{date_field_name}=", Date.parse(date_field_value))
+        rescue ArgumentError
+          @error_value = date_field_value
+          raise ArgumentError
+        end
       else
         issue.send("#{date_field_name}=", nil)
       end
