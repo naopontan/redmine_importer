@@ -1,8 +1,10 @@
 require File.expand_path('../../test_helper', __FILE__)
 
 class ImporterControllerTest < ActionController::TestCase
+  include ActiveJob::TestHelper
+
   def setup
-    @project = Project.create! :name => 'foo'
+    @project = Project.create! :name => 'foo', :identifier => 'importer_controller_test'
     @tracker = Tracker.new(:name => 'Defect')
     @tracker.default_status = IssueStatus.find_or_create_by!(name: 'New')
     @tracker.save!
@@ -20,7 +22,7 @@ class ImporterControllerTest < ActionController::TestCase
   test 'should handle multiple values for versions' do
     assert issue_has_none_of_these_multival_versions?(@issue,
                                                       ['Admin', '2013-09-25'])
-    post :result, build_params
+    post :result, params: build_params(update_issue: 'true')
     assert_response :success
     @issue.reload
     assert issue_has_all_these_multival_versions?(@issue, ['Admin', '2013-09-25'])
@@ -28,7 +30,7 @@ class ImporterControllerTest < ActionController::TestCase
 
   test 'should handle multiple values' do
     assert issue_has_none_of_these_multifield_vals?(@issue, ['tag1', 'tag2'])
-    post :result, build_params
+    post :result, params: build_params(update_issue: 'true')
     assert_response :success
     @issue.reload
     assert issue_has_all_these_multifield_vals?(@issue, ['tag1', 'tag2'])
@@ -36,48 +38,164 @@ class ImporterControllerTest < ActionController::TestCase
 
   test 'should handle single-value fields' do
     assert_equal 'foobar', @issue.subject
-    post :result, build_params
+    post :result, params: build_params(update_issue: 'true')
     assert_response :success
     @issue.reload
     assert_equal 'barfooz', @issue.subject
   end
 
   test 'should create issue if none exists' do
+    Mailer.expects(:deliver_issue_add).never
     Issue.delete_all
     assert_equal 0, Issue.count
-    post :result, build_params(:update_issue => nil)
+    post :result, params: build_params
     assert_response :success
     assert_equal 1, Issue.count
     issue = Issue.first
     assert_equal 'barfooz', issue.subject
   end
 
-  test 'should send email when Send email notifications checkbox is checked' do
+  test 'should send email when Send email notifications checkbox is checked and issue updated' do
     assert_equal 'foobar', @issue.subject
     Mailer.expects(:deliver_issue_edit)
 
-    post :result, build_params(:send_emails => 'true')
+    post :result, params: build_params(update_issue: 'true', send_emails: 'true')
     assert_response :success
     @issue.reload
     assert_equal 'barfooz', @issue.subject
+  end
+
+  test 'should send email when Send email notifications checkbox is checked and issue added' do
+    assert_equal 'foobar', @issue.subject
+    Mailer.expects(:deliver_issue_add)
+
+    assert_equal 0, Issue.where(subject: 'barfooz').count
+    post :result, params: build_params(send_emails: 'true')
+    assert_response :success
+    assert_equal 1, Issue.where(subject: 'barfooz').count
   end
 
   test 'should NOT send email when Send email notifications checkbox is unchecked' do
     assert_equal 'foobar', @issue.subject
     Mailer.expects(:deliver_issue_edit).never
 
-    post :result, build_params(:send_emails => nil)
+    post :result, params: build_params(update_issue: 'true')
     assert_response :success
     @issue.reload
     assert_equal 'barfooz', @issue.subject
   end
 
   test 'should add watchers' do
-    assert issue_has_none_of_these_watchers?(@issue, [@user, @user.parent])
-    post :result, build_params
+    assert issue_has_none_of_these_watchers?(@issue, [@user])
+    post :result, params: build_params(update_issue: 'true')
     assert_response :success
     @issue.reload
-    assert issue_has_all_of_these_watchers?(@issue, [@user, @user.parent])
+    assert issue_has_all_of_these_watchers?(@issue, [@user])
+  end
+
+  test 'should handle key value list value' do
+    Mailer.expects(:deliver_issue_add).never
+    IssueCustomField.where(name: 'Area').each { |icf| icf.update(multiple: false) }
+    @iip.destroy
+    @iip = create_iip!('KeyValueList', @user, @project)
+    post :result, params: build_params
+    assert_response :success
+    assert keyval_vals_for(Issue.find_by!(subject: 'パンケーキ')) == ['Tokyo']
+    assert keyval_vals_for(Issue.find_by!(subject: 'たこ焼き')) == ['Osaka']
+    assert Issue.find_by(subject: 'サーターアンダギー').nil?
+  end
+
+  test 'should handle multiple key value list values' do
+    Mailer.expects(:deliver_issue_add).never
+    @iip.destroy
+    @iip = create_iip!('KeyValueListMultiple', @user, @project)
+    post :result, params: build_params
+    assert_response :success
+    assert keyval_vals_for(Issue.find_by!(subject: 'パンケーキ')) == ['Tokyo']
+    assert keyval_vals_for(Issue.find_by!(subject: 'たこ焼き')) == ['Osaka']
+    issue = Issue.find_by!(subject: 'タピオカ')
+    assert ['Tokyo', 'Osaka'].all? { |area| area.in?(keyval_vals_for(Issue.find_by!(subject: 'タピオカ'))) }
+    assert Issue.find_by(subject: 'サーターアンダギー').nil?
+  end
+
+  test 'should error when assigned_to is missing' do
+    @iip.update!(csv_data: "#,Subject,assigned_to\n#{@issue.id},barfooz,JohnDoe\n")
+    @issue.update!(assigned_to: @user)
+    post :result, params: build_params(update_issue: 'true').tap { |params| params[:fields_map]['assigned_to'] = 'assigned_to' }
+    assert_response :success
+    assert response.body.include?('Warning')
+    @issue.reload
+    assert_equal 'foobar', @issue.subject
+    assert_equal @user, @issue.assigned_to
+  end
+
+  test 'should unset assigned_to when assigned_to user is not assignable' do
+    User.create!(login: 'john', firstname: 'John', lastname: 'Doe', mail: 'john.doe@example.com')
+    @iip.update!(csv_data: "#,Subject,assigned_to\n#{@issue.id},barfooz,john\n")
+    post :result, params: build_params(update_issue: 'true').tap { |params| params[:fields_map]['assigned_to'] = 'assigned_to' }
+    assert_response :success
+    assert !response.body.include?('Warning')
+    @issue.reload
+    assert_equal 'barfooz', @issue.subject
+    assert_nil @issue.assigned_to
+  end
+
+
+  test 'should error when user type CF value is missing' do
+    assigned_by_field = create_multivalue_field!('assigned_by', 'user', @issue.project)
+    @tracker.custom_fields << assigned_by_field
+    @issue.reload
+    @issue.custom_field_values.detect { |cfv| cfv.custom_field == assigned_by_field }.value = @user
+    @iip.update!(csv_data: "#,Subject,assigned_by\n#{@issue.id},barfooz,JeanDoe\n")
+    @issue.update!(assigned_to: @user)
+    post :result, params: build_params(update_issue: 'true').tap { |params| params[:fields_map]['assigned_by'] = 'assigned_by' }
+    assert_response :success
+    assert response.body.include?('Warning')
+    @issue.reload
+    assert_equal 'foobar', @issue.subject
+    assert_equal @user.name, @issue.custom_value_for(assigned_by_field).value
+  end
+
+  test 'should not error when assigned_to is missing but use_anonymous is true' do
+    @iip.update!(csv_data: "#,Subject,assigned_to\n#{@issue.id},barfooz,JohnDoe\n")
+    @issue.update!(assigned_to: @user)
+    post :result, params: build_params(update_issue: 'true', use_anonymous: 'true').tap { |params| params[:fields_map]['assigned_to'] = 'assigned_to' }
+    assert_response :success
+    assert !response.body.include?('Warning')
+    @issue.reload
+    assert_equal 'barfooz', @issue.subject
+    assert_nil @issue.assigned_to
+  end
+
+  test 'should not error when user type CF value is missing but use_anonymous is true' do
+    assigned_by_field = create_multivalue_field!('assigned_by', 'user', @issue.project)
+    @tracker.custom_fields << assigned_by_field
+    @issue.reload
+    @issue.custom_field_values.detect { |cfv| cfv.custom_field == assigned_by_field }.value = @user
+    @iip.update!(csv_data: "#,Subject,assigned_by\n#{@issue.id},barfooz,JeanDoe\n")
+    @issue.update!(assigned_to: @user)
+    post :result, params: build_params(update_issue: 'true', use_anonymous: 'true').tap { |params| params[:fields_map]['assigned_by'] = 'assigned_by' }
+    assert_response :success
+    assert !response.body.include?('Warning')
+    @issue.reload
+    assert_equal 'barfooz', @issue.subject
+    assert_equal '', @issue.custom_value_for(assigned_by_field).value
+  end
+
+  test 'should not error when user type CF value is not listed in possible values' do
+    User.create!(login: 'john', firstname: 'John', lastname: 'Doe', mail: 'john.doe@example.com')
+    assigned_by_field = create_multivalue_field!('assigned_by', 'user', @issue.project)
+    @tracker.custom_fields << assigned_by_field
+    @issue.reload
+    @issue.custom_field_values.detect { |cfv| cfv.custom_field == assigned_by_field }.value = @user
+    @iip.update!(csv_data: "#,Subject,assigned_by\n#{@issue.id},barfooz,john\n")
+    @issue.update!(assigned_to: @user)
+    post :result, params: build_params(update_issue: 'true', use_anonymous: 'true').tap { |params| params[:fields_map]['assigned_by'] = 'assigned_by' }
+    assert_response :success
+    assert !response.body.include?('Warning')
+    @issue.reload
+    assert_equal 'barfooz', @issue.subject
+    assert_equal '', @issue.custom_value_for(assigned_by_field).value
   end
 
   protected
@@ -86,7 +204,6 @@ class ImporterControllerTest < ActionController::TestCase
     @iip.reload
     opts.reverse_merge(
       :import_timestamp => @iip.created.strftime("%Y-%m-%d %H:%M:%S"),
-      :update_issue => 'true',
       :unique_field => '#',
       :project_id => @project.id,
       :fields_map => {
@@ -97,7 +214,8 @@ class ImporterControllerTest < ActionController::TestCase
         'Priority' => 'priority',
         'Tracker' => 'tracker',
         'Status' => 'status',
-        'Watchers' => 'watchers'
+        'Watchers' => 'watchers',
+        'Area' => 'Area'
       }
     )
   end
@@ -156,6 +274,12 @@ class ImporterControllerTest < ActionController::TestCase
     values = value_objs.map(&:value)
   end
 
+  def keyval_vals_for(issue)
+    keyval_field = CustomField.find_by_name! 'Area'
+    value_objs = issue.custom_values.where(custom_field_id: keyval_field.id)
+    value_objs.map { |value_obj| keyval_field.enumerations.find(value_obj.value).name }
+  end
+
   def create_user!(role, project)
     user = User.new :admin => true,
                     :login => 'bob',
@@ -168,9 +292,7 @@ class ImporterControllerTest < ActionController::TestCase
                        :lastname => 'H',
                        :mail => 'a@example.com'
     sponsor.login = 'alice'
-    sponsor.parent = sponsor
 
-    user.parent = sponsor
     membership = user.memberships.build(:project => project)
     membership.roles << role
     membership.principal = user
@@ -217,12 +339,16 @@ class ImporterControllerTest < ActionController::TestCase
     versions_field = create_multivalue_field!('Affected versions',
                                               'version',
                                               issue.project)
-    multival_field =     create_multivalue_field!('Tags',
+    multival_field = create_multivalue_field!('Tags',
                                               'list',
                                               issue.project,
                                               %w(tag1 tag2))
+    keyval_field = create_enumeration_field!('Area',
+                                            issue.project,
+                                            %w(Tokyo Osaka))
     issue.tracker.custom_fields << versions_field
     issue.tracker.custom_fields << multival_field
+    issue.tracker.custom_fields << keyval_field
     issue.tracker.save!
   end
 
@@ -232,6 +358,16 @@ class ImporterControllerTest < ActionController::TestCase
     field.projects << project
     field.possible_values = possible_vals if possible_vals
     field.save!
+    field
+  end
+
+  def create_enumeration_field!(name, project, enumerations)
+    field = IssueCustomField.new :name => name, :multiple => true, :field_format => 'enumeration'
+    field.projects << project
+    field.save!
+    enumerations.each.with_index(1) do |name, position|
+      CustomFieldEnumeration.create!(:name => name, :custom_field_id => field.id, :active => true, :position => position)
+    end
     field
   end
 

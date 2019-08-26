@@ -4,7 +4,7 @@ require 'tempfile'
 MultipleIssuesForUniqueValue = Class.new(Exception)
 NoIssueForUniqueValue = Class.new(Exception)
 
-class Journal < ActiveRecord::Base
+Journal.class_eval do
   def empty?(*args)
     (details.empty? && notes.blank?)
   end
@@ -13,7 +13,7 @@ end
 class ImporterController < ApplicationController
   unloadable
 
-  before_filter :find_project
+  before_action :find_project
 
   ISSUE_ATTRS = [:id, :subject, :assigned_to, :fixed_version,
                  :author, :description, :category, :priority, :tracker, :status,
@@ -31,7 +31,7 @@ class ImporterController < ApplicationController
     end
 
     # Delete existing iip to ensure there can't be two iips for a user
-    ImportInProgress.delete_all(["user_id = ?",User.current.id])
+    ImportInProgress.where("user_id = ?", User.current.id).delete_all
     # save import-in-progress data
     iip = ImportInProgress.find_or_create_by(user_id: User.current.id)
     iip.quote_char = params[:wrapper]
@@ -150,7 +150,6 @@ class ImporterController < ApplicationController
                :quote_char=>iip.quote_char,
                :col_sep=>iip.col_sep}
     CSV.new(iip.csv_data, csv_opt).each do |row|
-
       project = Project.find_by_name(fetch("project", row))
       project ||= @project
 
@@ -163,6 +162,7 @@ class ImporterController < ApplicationController
         end
 
         issue = Issue.new
+        issue.notify = false
 
         if use_issue_id
           issue.id = fetch("id", row)
@@ -196,6 +196,7 @@ class ImporterController < ApplicationController
 
         if fetch("assigned_to", row).present?
           assigned_to = user_for_login!(fetch("assigned_to", row))
+          assigned_to = nil if assigned_to == User.anonymous
         else
           assigned_to = nil
         end
@@ -222,7 +223,6 @@ class ImporterController < ApplicationController
       end
 
       begin
-
         unique_attr = translate_unique_attr(issue, unique_field, unique_attr, unique_attr_checked)
 
         issue, journal = handle_issue_update(issue, row, author, status, update_other_project, journal_field,
@@ -231,7 +231,6 @@ class ImporterController < ApplicationController
         project ||= Project.find_by_id(issue.project_id)
 
         update_project_issues_stat(project)
-
         assign_issue_attrs(issue, category, fixed_version_id, assigned_to, status, row, priority, tracker)
         handle_parent_issues(issue, row, ignore_non_exist, unique_attr)
         handle_custom_fields(add_versions, issue, project, row)
@@ -330,7 +329,7 @@ class ImporterController < ApplicationController
     iip.delete
 
     # Garbage prevention: clean up iips older than 3 days
-    ImportInProgress.delete_all(["created < ?",Time.new - 3*24*60*60])
+    ImportInProgress.where("created < ?", Time.new - 3*24*60*60).delete_all
   end
 
   def translate_unique_attr(issue, unique_field, unique_attr, unique_attr_checked)
@@ -431,6 +430,7 @@ class ImporterController < ApplicationController
     end
 
     issue.assigned_to_id = assigned_to.try(:id)
+    issue.assigned_to = nil unless issue.assigned_to.in?(issue.assignable_users)
     issue.fixed_version_id = fixed_version_id
     issue.done_ratio = fetch("done_ratio", row)
     issue.estimated_hours = fetch("estimated_hours", row)
@@ -479,6 +479,8 @@ class ImporterController < ApplicationController
     @user_by_login = Hash.new
     # Cache of Version by name
     @version_id_by_name = Hash.new
+    # Cache of CustomFieldEnumeration by name
+    @enumeration_id_by_name = Hash.new
   end
 
   def handle_watchers(issue, row, watchers)
@@ -519,13 +521,18 @@ class ImporterController < ApplicationController
           if value.present?
             value = case cf.field_format
                     when 'user'
-                      user_id_for_login!(value).to_s
+                      user = user_id_for_login!(value)
+                      if user.in?(cf.format.possible_values_records(cf, issue).map(&:id))
+                        user == User.anonymous.id ? nil : user.to_s
+                      end
                     when 'version'
                       version_id_for_name!(project, value, add_versions).to_s
                     when 'date'
                       value.to_date.to_s(:db)
                     when 'bool'
                       convert_to_0_or_1(value)
+                    when 'enumeration'
+                      enumeration_id_for_name!(cf, value).to_s
                     else
                       value
                     end
@@ -731,6 +738,19 @@ class ImporterController < ApplicationController
     @version_id_by_name[name]
   end
 
+  def enumeration_id_for_name!(custom_field, name)
+    unless @enumeration_id_by_name.key?(name)
+      enumeration = custom_field.enumerations.find_by(name: name).try!(:id)
+      if enumeration.nil?
+        @unfound_class = "CustomFieldEnumeration"
+        @unfound_key = name
+        raise ActiveRecord::RecordNotFound, "No enumeration named #{name}"
+      end
+      @enumeration_id_by_name[name] = enumeration
+    end
+    @enumeration_id_by_name[name]
+  end
+
   def process_multivalue_custom_field(project, add_versions, issue, custom_field, csv_val)
     return [] if csv_val.blank?
 
@@ -738,6 +758,13 @@ class ImporterController < ApplicationController
       if custom_field.field_format == 'version'
         version = version_id_for_name!(project, val, add_versions)
         version
+      elsif custom_field.field_format == 'enumeration'
+        enumeration_id_for_name!(custom_field, val)
+      elsif custom_field.field_format == 'user'
+        user = user_id_for_login!(val)
+        if user.in?(custom_field.format.possible_values_records(custom_field, issue).map(&:id))
+          user == User.anonymous.id ? nil : user.to_s
+        end
       else
         val
       end

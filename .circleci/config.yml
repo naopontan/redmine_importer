@@ -1,0 +1,16 @@
+version: 2.1
+
+orbs:
+  redmine: agileware-jp/redmine-plugin@0.0.14
+
+workflows:
+  version: 2
+  test:
+    jobs:
+      - redmine/download:
+          name: 'redmine40-download'
+          redmine_version: '4.0.4'
+      - redmine/test:
+          name: 'redmine40-test'
+          executor: redmine/ruby-pg
+          requires: [redmine40-download]
