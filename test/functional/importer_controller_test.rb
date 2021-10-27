@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require File.expand_path('../../test_helper', __FILE__)
+require File.expand_path('../test_helper', __dir__)
 
 class ImporterControllerTest < ActionController::TestCase
   include ActiveJob::TestHelper
@@ -125,7 +125,9 @@ class ImporterControllerTest < ActionController::TestCase
   test 'should handle issue relation' do
     other_issue = create_issue!(@project, @user, { subject: 'other_issue' })
     @iip.update!(csv_data: "#,Subject,Duplicated issue ID\n#{@issue.id},set other issue relation,#{other_issue.id}\n")
-    post :result, params: build_params(update_issue: 'true').tap { |params| params[:fields_map]['Duplicated issue ID'] = "issue_relation-#{IssueRelation::TYPE_DUPLICATED}" }
+    post :result, params: build_params(update_issue: 'true').tap { |params|
+                            params[:fields_map]['Duplicated issue ID'] = "issue_relation-#{IssueRelation::TYPE_DUPLICATED}"
+                          }
     assert_response :success
     @issue.reload
     assert_equal 'set other issue relation', @issue.subject
@@ -138,7 +140,9 @@ class ImporterControllerTest < ActionController::TestCase
   test 'should error when assigned_to is missing' do
     @iip.update!(csv_data: "#,Subject,assigned_to\n#{@issue.id},barfooz,JohnDoe\n")
     @issue.update!(assigned_to: @user)
-    post :result, params: build_params(update_issue: 'true').tap { |params| params[:fields_map]['assigned_to'] = 'standard_field-assigned_to' }
+    post :result, params: build_params(update_issue: 'true').tap { |params|
+                            params[:fields_map]['assigned_to'] = 'standard_field-assigned_to'
+                          }
     assert_response :success
     assert response.body.include?('Warning')
     @issue.reload
@@ -149,7 +153,9 @@ class ImporterControllerTest < ActionController::TestCase
   test 'should unset assigned_to when assigned_to user is not assignable' do
     User.create!(login: 'john', firstname: 'John', lastname: 'Doe', mail: 'john.doe@example.com')
     @iip.update!(csv_data: "#,Subject,assigned_to\n#{@issue.id},barfooz,john\n")
-    post :result, params: build_params(update_issue: 'true').tap { |params| params[:fields_map]['assigned_to'] = 'standard_field-assigned_to' }
+    post :result, params: build_params(update_issue: 'true').tap { |params|
+                            params[:fields_map]['assigned_to'] = 'standard_field-assigned_to'
+                          }
     assert_response :success
     assert !response.body.include?('Warning')
     @issue.reload
@@ -164,7 +170,9 @@ class ImporterControllerTest < ActionController::TestCase
     @issue.custom_field_values.detect { |cfv| cfv.custom_field == assigned_by_field }.value = @user
     @iip.update!(csv_data: "#,Subject,assigned_by\n#{@issue.id},barfooz,JeanDoe\n")
     @issue.update!(assigned_to: @user)
-    post :result, params: build_params(update_issue: 'true').tap { |params| params[:fields_map]['assigned_by'] = 'standard_field-assigned_by' }
+    post :result, params: build_params(update_issue: 'true').tap { |params|
+                            params[:fields_map]['assigned_by'] = 'standard_field-assigned_by'
+                          }
     assert_response :success
     assert response.body.include?('Warning')
     @issue.reload
@@ -175,7 +183,9 @@ class ImporterControllerTest < ActionController::TestCase
   test 'should not error when assigned_to is missing but use_anonymous is true' do
     @iip.update!(csv_data: "#,Subject,assigned_to\n#{@issue.id},barfooz,JohnDoe\n")
     @issue.update!(assigned_to: @user)
-    post :result, params: build_params(update_issue: 'true', use_anonymous: 'true').tap { |params| params[:fields_map]['assigned_to'] = 'standard_field-assigned_to' }
+    post :result, params: build_params(update_issue: 'true', use_anonymous: 'true').tap { |params|
+                            params[:fields_map]['assigned_to'] = 'standard_field-assigned_to'
+                          }
     assert_response :success
     assert !response.body.include?('Warning')
     @issue.reload
@@ -190,7 +200,9 @@ class ImporterControllerTest < ActionController::TestCase
     @issue.custom_field_values.detect { |cfv| cfv.custom_field == assigned_by_field }.value = @user
     @iip.update!(csv_data: "#,Subject,assigned_by\n#{@issue.id},barfooz,JeanDoe\n")
     @issue.update!(assigned_to: @user)
-    post :result, params: build_params(update_issue: 'true', use_anonymous: 'true').tap { |params| params[:fields_map]['assigned_by'] = 'custom_field-assigned_by' }
+    post :result, params: build_params(update_issue: 'true', use_anonymous: 'true').tap { |params|
+                            params[:fields_map]['assigned_by'] = 'custom_field-assigned_by'
+                          }
     assert_response :success
     assert !response.body.include?('Warning')
     @issue.reload
@@ -206,7 +218,9 @@ class ImporterControllerTest < ActionController::TestCase
     @issue.custom_field_values.detect { |cfv| cfv.custom_field == assigned_by_field }.value = @user
     @iip.update!(csv_data: "#,Subject,assigned_by\n#{@issue.id},barfooz,john\n")
     @issue.update!(assigned_to: @user)
-    post :result, params: build_params(update_issue: 'true', use_anonymous: 'true').tap { |params| params[:fields_map]['assigned_by'] = 'custom_field-assigned_by' }
+    post :result, params: build_params(update_issue: 'true', use_anonymous: 'true').tap { |params|
+                            params[:fields_map]['assigned_by'] = 'custom_field-assigned_by'
+                          }
     assert_response :success
     assert !response.body.include?('Warning')
     @issue.reload
@@ -235,6 +249,40 @@ class ImporterControllerTest < ActionController::TestCase
     issue.save!
   end
 
+  test "should NOT change an open issue's parent to an closed issue" do
+    closed_status = IssueStatus.find_or_create_by!(name: 'Closed', is_closed: true)
+    parent = create_issue!(@project, @user, status: closed_status)
+    @iip.update!(csv_data: "#,Parent\n#{@issue.id},#{parent.id}\n")
+    post :result, params: build_params(update_issue: 'true')
+    assert_response :success
+    assert response.body.include?('Error')
+    assert_nil @issue.reload.parent
+  end
+
+  test 'should NOT close an issue having open children' do
+    @child = create_issue!(@project, @user, parent_id: @issue.id)
+    assert @issue.children.include?(@child)
+    assert !@issue.status.is_closed?
+    assert !@child.status.is_closed?
+    IssueStatus.find_or_create_by!(name: 'Closed', is_closed: true)
+    @iip.update!(csv_data: "#,Status\n#{@issue.id},Closed\n")
+    post :result, params: build_params(update_issue: 'true')
+    assert_response :success
+    assert response.body.include?('Error')
+    assert !@issue.reload.status.is_closed?
+  end
+
+  test 'should NOT reopen an issue having closed parent' do
+    closed_status = IssueStatus.find_or_create_by!(name: 'Closed', is_closed: true)
+    @issue.parent = create_issue!(@project, @user, status: closed_status)
+    @issue.update!(status: closed_status)
+    @iip.update!(csv_data: "#,Status\n#{@issue.id},New\n")
+    post :result, params: build_params(update_issue: 'true')
+    assert_response :success
+    assert response.body.include?('Error')
+    assert @issue.reload.status.is_closed?
+  end
+
   protected
 
   def build_params(opts = {})
@@ -252,6 +300,7 @@ class ImporterControllerTest < ActionController::TestCase
         'Tracker' => 'standard_field-tracker',
         'Status' => 'standard_field-status',
         'Watchers' => 'standard_field-watchers',
+        'Parent' => 'standard_field-parent_issue',
         'Area' => 'custom_field-Area'
       }
     )
@@ -362,12 +411,13 @@ class ImporterControllerTest < ActionController::TestCase
   def create_issue!(project, author, options = {})
     issue = Issue.new
     issue.id = options[:id]
+    issue.parent_id = options[:parent_id]
     issue.project = project
     issue.subject = options[:subject] || 'foobar'
     issue.priority = IssuePriority.find_or_create_by!(name: 'Critical')
     issue.tracker = project.trackers.first
     issue.author = author
-    issue.status = IssueStatus.find_or_create_by!(name: 'New')
+    issue.status = options[:status] || IssueStatus.find_or_create_by!(name: 'New')
     issue.start_date = author.today
     issue.save!
     issue
