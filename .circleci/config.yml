@@ -14,10 +14,6 @@ orbs:
             default: redmine
             description: Directory where redmine is installed
             type: string
-          test_migration_rollback:
-            default: true
-            description: Test migration rollback?
-            type: boolean
         steps:
           - run:
               name: Setup Database
@@ -37,15 +33,6 @@ orbs:
               command: >-
                 RAILS_ENV=test bundle exec rake redmine:plugins:test PLUGIN=`cat .tested_plugin`
               working_directory: << parameters.redmine_root >>
-          - when:
-              condition: << parameters.test_migration_rollback  >>
-              steps:
-                - run:
-                    command: >-
-                      RAILS_ENV=test bundle exec rake redmine:plugins:migrate PLUGIN=`cat
-                      .tested_plugin` VERSION=0
-                    name: Test migration rollback
-                    working_directory: << parameters.redmine_root >>
 jobs:
   run-tests:
     executor:
