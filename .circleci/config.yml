@@ -17,7 +17,7 @@ orbs:
         steps:
           - run:
               name: Setup Database
-              command: 'RAILS_ENV=test bundle exec rake db:migrate'
+              command: 'RAILS_ENV=test bundle exec rake db:migrate redmine:plugins:migrate'
               working_directory: << parameters.redmine_root >>
           - run:
               name: Set tested plugin
