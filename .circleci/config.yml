@@ -2,6 +2,7 @@ version: 2.1
 
 orbs:
   redmine-plugin: agileware-jp/redmine-plugin@2.3.0
+  # 本来なら以下の orb は redmine-plugin の test コマンドで対応すべき. (https://circleci.com/developer/orbs/orb/agileware-jp/redmine-plugin#commands-test)
   plugin-test:
     commands:
       run-tests:
@@ -17,7 +18,7 @@ orbs:
         steps:
           - run:
               name: Setup Database
-              command: 'RAILS_ENV=test bundle exec rake db:migrate redmine:plugins:migrate'
+              command: 'RAILS_ENV=test bundle exec rake db:migrate redmine:plugins:migrate' # db:create はここでやるのは適切ではない
               working_directory: << parameters.redmine_root >>
           - run:
               name: Set tested plugin
@@ -30,6 +31,7 @@ orbs:
                 echo $PLUGIN_NAME >> .tested_plugin
               working_directory: << parameters.redmine_root >>
           - run:
+              # `PLUGIN` という名前に変わっている
               command: >-
                 RAILS_ENV=test bundle exec rake redmine:plugins:test PLUGIN=`cat .tested_plugin`
               working_directory: << parameters.redmine_root >>
