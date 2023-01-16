@@ -65,4 +65,4 @@ workflows:
         - run-tests:
             database: pg
             ruby_version: '2.7'
-            redmine_version: '5.0.3'
+            redmine_version: '4.2.9'
